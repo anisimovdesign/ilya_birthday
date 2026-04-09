@@ -1,0 +1,1759 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Падел — корт</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #1a1e24;
+      font-family: system-ui, sans-serif;
+    }
+    canvas#court {
+      position: fixed;
+      left: 0;
+      top: 0;
+      display: block;
+      margin: 0;
+      border-radius: 0;
+      box-shadow: none;
+      z-index: 0;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    .hud-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .hud-overlay #madnessBtn {
+      pointer-events: auto;
+    }
+    /* Слева от корта: заголовок, счёт, кнопка, подсказка (корт 344px по центру) */
+    .hud-sidebar {
+      position: fixed;
+      left: 20px;
+      top: 50%;
+      transform: translateY(-50%);
+      z-index: 2;
+      width: min(300px, max(160px, calc(50vw - 344px / 2 - 36px)));
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 14px;
+      text-align: left;
+      line-height: 1.5;
+    }
+    .hud-sidebar h1 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: #8b95a8;
+      text-transform: uppercase;
+    }
+    .hud-sidebar .score {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+      color: #c5cdd8;
+      letter-spacing: 0.06em;
+    }
+    .hud-sidebar .hint {
+      margin: 0;
+      font-size: 12px;
+      color: #9aa8bc;
+      max-width: none;
+      line-height: 1.5;
+    }
+    .hud-sidebar .hint strong {
+      color: #c5cdd8;
+      font-weight: 600;
+    }
+    .madness-btn {
+      display: none;
+      margin: 0;
+      align-self: flex-start;
+      padding: 14px 32px;
+      font-size: 14px;
+      font-weight: 800;
+      font-family: inherit;
+      letter-spacing: 0.12em;
+      border: 3px solid #fff;
+      border-radius: 12px;
+      cursor: pointer;
+      color: #1a0520;
+      background: linear-gradient(120deg, #ff2a6d, #fffc00, #05ffa1, #ff2a6d);
+      background-size: 300% 300%;
+      box-shadow:
+        0 0 20px rgba(255, 45, 120, 0.85),
+        0 0 40px rgba(255, 252, 0, 0.45),
+        inset 0 0 20px rgba(255, 255, 255, 0.35);
+      animation: madnessPulse 0.85s ease-in-out infinite, madnessBg 2.4s ease infinite;
+    }
+    .madness-btn.madness-btn--visible {
+      display: inline-block;
+    }
+    .madness-btn:focus {
+      outline: 3px solid #05ffa1;
+      outline-offset: 3px;
+    }
+    .hud-sidebar .madness-btn {
+      max-width: 100%;
+      white-space: normal;
+      line-height: 1.25;
+      padding: 12px 16px;
+      text-align: center;
+    }
+    @keyframes madnessPulse {
+      0%, 100% {
+        transform: scale(1);
+        box-shadow:
+          0 0 18px rgba(255, 45, 120, 0.75),
+          0 0 36px rgba(255, 252, 0, 0.4),
+          inset 0 0 16px rgba(255, 255, 255, 0.3);
+      }
+      50% {
+        transform: scale(1.07);
+        box-shadow:
+          0 0 32px rgba(255, 45, 120, 1),
+          0 0 56px rgba(5, 255, 161, 0.55),
+          inset 0 0 24px rgba(255, 255, 255, 0.5);
+      }
+    }
+    @keyframes madnessBg {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    body.gift-room .hud-sidebar {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transition: opacity 0.2s ease, visibility 0.2s ease;
+    }
+    body.gift-room .hud-sidebar {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.35s ease;
+    }
+    @media (max-width: 620px) {
+      .hud-sidebar {
+        left: 16px;
+        right: 16px;
+        top: auto;
+        bottom: 16px;
+        transform: none;
+        width: auto;
+        max-width: none;
+        align-items: center;
+        text-align: center;
+      }
+      .hud-sidebar .madness-btn {
+        align-self: center;
+      }
+      .hud-sidebar .hint {
+        font-size: 11px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="court" width="800" height="600" aria-label="Корт падела, вид сверху"></canvas>
+  <div class="hud-overlay">
+    <aside class="hud-sidebar" aria-label="Меню и подсказка">
+      <h1>Чемпион, это твоя праздничная битва</h1>
+      <p class="score" id="score">Ты 0 — Они 0</p>
+      <p class="hint" id="hintText">
+        Бегай стрелками · <strong>Пробел</strong> — подача и удар.
+      </p>
+      <button type="button" class="madness-btn" id="madnessBtn" aria-hidden="true">
+        РЕЖИМ БЕЗУМИЯ
+      </button>
+    </aside>
+  </div>
+  <script>
+    (function () {
+      const canvas = document.getElementById('court');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const M_W = 10;
+      const M_H = 20;
+      const SERVICE_FROM_NET_M = 6.95;
+
+      const WALL_CELLS = 3;
+      const CELL = 4;
+      const INNER_W = 80;
+      const INNER_H = 160;
+      const W = INNER_W + WALL_CELLS * 2;
+      const H = INNER_H + WALL_CELLS * 2;
+      const BASE_CANVAS_W = W * CELL;
+      const COURT_H_PX = H * CELL;
+
+      let inGiftRoom = false;
+      let giftRoomW = 640;
+      let giftRoomH = 480;
+      /** Заглушки подарков 64×64 в координатах комнаты */
+      let giftBoxes = [];
+
+      function courtOriginX() {
+        return Math.max(0, Math.floor((canvas.width - BASE_CANVAS_W) / 2));
+      }
+
+      function courtOriginY() {
+        return Math.max(0, Math.floor((canvas.height - COURT_H_PX) / 2));
+      }
+
+      function syncCanvasSize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        if (inGiftRoom) {
+          layoutGiftRoomSize();
+          buildGiftPile();
+          const hu = players.find((q) => q.human);
+          if (hu) {
+            hu.x = clamp(hu.x, PLAYER_R, giftRoomW - PLAYER_R);
+            hu.y = clamp(hu.y, PLAYER_R, giftRoomH - PLAYER_R);
+          }
+        }
+      }
+
+      syncCanvasSize();
+      window.addEventListener('resize', syncCanvasSize);
+      ctx.imageSmoothingEnabled = false;
+
+      let imgPlayerSprite = null;
+      let imgBotSprite = null;
+
+      function loadPlayerSprites() {
+        const ip = new Image();
+        ip.onload = function () {
+          imgPlayerSprite = ip;
+        };
+        ip.onerror = function () {
+          imgPlayerSprite = null;
+        };
+        ip.src = 'player.png';
+        const ib = new Image();
+        ib.onload = function () {
+          imgBotSprite = ib;
+        };
+        ib.onerror = function () {
+          imgBotSprite = null;
+        };
+        ib.src = 'bot.png';
+      }
+
+      const palette = {
+        courtBlue: '#4f8fc9',
+        courtSpeck: '#3d78b5',
+        line: '#f0f4ef',
+        lineShadow: '#c8d4c4',
+        wallBase: '#5c6674',
+        wallDark: '#3d4552',
+        wallLight: '#7a8696',
+        wallMesh: '#2f3540',
+        netPost: '#3a3540',
+        netWhite: '#e8eef2',
+        netShadow: '#9aa8b8',
+        bounceAccent: '#c9e86c',
+        bounceDark: '#7a9a3a',
+      };
+
+      const netRowCenter = Math.floor(WALL_CELLS + INNER_H / 2);
+      const netHalfRows = Math.max(2, Math.floor(0.04 * INNER_H));
+
+      const innerLeftPx = WALL_CELLS * CELL;
+      const innerTopPx = WALL_CELLS * CELL;
+      const innerWpx = INNER_W * CELL;
+      const innerHpx = INNER_H * CELL;
+      const innerRightPx = innerLeftPx + innerWpx;
+      const innerBottomPx = innerTopPx + innerHpx;
+      const midXPx = innerLeftPx + innerWpx / 2;
+      /** Центр правой половины корта — цель огненного мяча */
+      const madnessTargetX = midXPx + (innerRightPx - midXPx) * 0.5;
+      const madnessTargetY = innerTopPx + innerHpx * 0.5;
+
+      /** Нижний край верхней половины: макс. Y центра игрока (ряд над сеткой) */
+      const yTopHalfMaxCenter =
+        (netRowCenter - netHalfRows - 1) * CELL + CELL / 2;
+      /** Верхний край нижней половины: мин. Y центра игрока (ряд под сеткой) */
+      const yBottomHalfMinCenter =
+        (netRowCenter + netHalfRows + 1) * CELL + CELL / 2;
+
+      const PLAYER_R = 30;
+      const FIG_SCALE = 3;
+      const HUMAN_SPEED = 220;
+      const BOT_SPEED = 100;
+
+      /** Размер мяча на экране только от высоты z (не от места на корте — иначе путаница с «подъёмом») */
+      const BALL_R_AT_Z0 = 5.35;
+      const BALL_R_PER_Z = 0.058;
+      const BALL_R_Z_CAP = 10.4;
+      const BALL_R_PHYS = 5;
+      const GRAVITY = 620;
+      const BOUNCE_Z = 0.68;
+      /** Вертикаль привязана к горизонтальной скорости (без «пола» по maxZ — иначе мяч висит в воздухе) */
+      const VERT_VZ_MAX_CAP = 305;
+      const VERT_Z_MAX_CAP = 78;
+      /** Ниже — почти пол: прижимаем к z=0, чтобы не скользить в микровысоте */
+      const Z_GROUND_SNAP = 0.12;
+      const BOUNCE_HORIZ_REF = 260;
+      /** Боковые стены (вдоль длины корта): умеренное сохранение vx */
+      const WALL_SIDE_KEEP = 0.82;
+      /**
+       * Задние стены (верх/низ экрана): мяч прилетел в стекло — отскок вдоль корта сильно слабее,
+       * иначе он зеркально летит к сетке и «перепрыгивает» твою половину без приземления на пол.
+       */
+      const WALL_BACK_ALONG_KEEP = 0.32;
+      const WALL_BACK_VY_CAP = 108;
+      /** Удар о стену чуть съедает высоту */
+      const WALL_VZ_DAMP = 0.78;
+      const WALL_Z_SHRINK = 0.9;
+      /** После стены нельзя продолжать активно подниматься: иначе «улетает вверх» при отскоке */
+      const WALL_KILL_UPWARD = 0.34;
+      const WALL_Z_IF_STILL_RISING = 0.86;
+      /** С задней стены чаще хочется приземление: гасим подлёт вверх */
+      const WALL_BACK_VZ_UP_DAMP = 0.52;
+      /** Второе касание стены подряд (без пола): сильная потеря скорости и высоты */
+      const WALL_CHAIN_HORIZ_MUL = 0.34;
+      const WALL_CHAIN_MAX_HORIZ = 88;
+      const WALL_CHAIN_VZ_MUL = 0.22;
+      const WALL_CHAIN_Z_MUL = 0.38;
+      const HIT_SPEED = 340;
+      const SERVE_SPEED = 400;
+      const Z_HIT_MAX = 62;
+      const HIT_REACH = 26;
+      const HIT_COOLDOWN = 0.2;
+      const BOT_HIT_COOLDOWN = 0.28;
+
+      const yHalfSplitPx = innerTopPx + innerHpx / 2;
+
+      const keys = {
+        ArrowUp: false,
+        ArrowDown: false,
+        ArrowLeft: false,
+        ArrowRight: false,
+      };
+      let spacePressed = false;
+
+      let humanScore = 0;
+      let botScore = 0;
+      /** Скрытый счётчик ударов ракеткой (все игроки); не показываем в UI */
+      let totalRacketHits = 0;
+      let madnessSuperReady = false;
+      let wallBreached = false;
+      let botsFrozen = false;
+      /** Боты убегают к разлому и в сторону; после выхода — исчезают, затем botsFrozen */
+      let botsFleeing = false;
+      const BOT_FLEE_SPEED = 300;
+      /** Вертикальный проём в правой стене (пиксели), задаётся при ударе */
+      let breachGapY0 = 0;
+      let breachGapY1 = 0;
+
+      const EXPLOSION_FRAME_COUNT = 7;
+      const EXPLOSION_FRAME_DT = 0.078;
+      /** Пиксельный взрыв без внешнего файла (file:// и отсутствие PNG ломали спрайт) */
+      const EXPLOSION_PIXEL = 4;
+      const EXPLOSION_PALETTE = ['#fff176', '#ff9800', '#e53935', '#cfd8dc'];
+      /** Несколько взрывов вдоль разлома: { age, x, y, pixel? } */
+      const WALL_EXPLOSION_INSTANCES = 8;
+      const WALL_EXPLOSION_STAGGER = 0.04;
+      let wallExplosions = [];
+
+      function wallExplosionDotsForFrame(fi) {
+        const m = new Map();
+        const add = (dx, dy, c) => {
+          const k = dx + ',' + dy;
+          const cur = m.get(k);
+          if (cur === undefined || c < cur) m.set(k, c);
+        };
+        add(0, 0, 0);
+        for (let ring = 0; ring <= fi; ring++) {
+          const steps = 10 + ring * 5;
+          const rad = 0.35 + ring * 0.9;
+          for (let i = 0; i < steps; i++) {
+            const a = (i / steps) * Math.PI * 2 + ring * 0.45 + fi * 0.12;
+            const dx = Math.round(Math.cos(a) * rad * (2.1 + fi * 0.12));
+            const dy = Math.round(Math.sin(a) * rad * (2.1 + fi * 0.12));
+            const d = Math.hypot(dx, dy);
+            let c = d < 1.2 ? 0 : d < 2.7 ? 1 : d < 4.4 ? 2 : 3;
+            if (fi >= 5 && c === 0) c = 1;
+            if (fi >= 6) c = Math.min(3, c + 1);
+            if (fi > 2 && d > 2.2 && (dx + dy + ring + fi) % 6 === 0) continue;
+            add(dx, dy, c);
+          }
+        }
+        if (fi >= 3) {
+          const n = 8 + fi * 3;
+          for (let i = 0; i < n; i++) {
+            const t = (i * 2654435761 + fi * 1103515245) >>> 0;
+            const ang = ((t % 628) / 100) * Math.PI;
+            const rr = 3 + (t >>> 9) % (4 + fi);
+            const dx = Math.round(Math.cos(ang) * rr);
+            const dy = Math.round(Math.sin(ang) * rr);
+            add(dx, dy, 2 + ((t >>> 3) % 2));
+          }
+        }
+        return Array.from(m.entries()).map(([k, c]) => {
+          const [dx, dy] = k.split(',').map(Number);
+          return [dx, dy, c];
+        });
+      }
+
+      const wallExplosionDotsCache = [];
+      for (let f = 0; f < EXPLOSION_FRAME_COUNT; f++) {
+        wallExplosionDotsCache[f] = wallExplosionDotsForFrame(f);
+      }
+
+      function spawnWallExplosionsAlongBreach() {
+        wallExplosions = [];
+        const wallMidX = innerRightPx + (WALL_CELLS * CELL) * 0.5;
+        const g0 = breachGapY0;
+        const g1 = breachGapY1;
+        const gapLen = Math.max(12, g1 - g0);
+        const n = WALL_EXPLOSION_INSTANCES;
+        for (let i = 0; i < n; i++) {
+          const t = (i + 0.5) / n;
+          const y = g0 + gapLen * t;
+          const x = wallMidX + (((i * 83) % 5) + ((i * 41) % 3)) - 3;
+          wallExplosions.push({
+            age: -i * WALL_EXPLOSION_STAGGER,
+            x,
+            y,
+            pixel: EXPLOSION_PIXEL * (0.82 + (i % 4) * 0.1),
+          });
+        }
+      }
+
+      function updateWallExplosion(dt) {
+        for (let i = wallExplosions.length - 1; i >= 0; i--) {
+          const e = wallExplosions[i];
+          e.age += dt;
+          if (e.age >= EXPLOSION_FRAME_COUNT * EXPLOSION_FRAME_DT) {
+            wallExplosions.splice(i, 1);
+          }
+        }
+      }
+
+      function drawWallExplosion() {
+        for (let e = 0; e < wallExplosions.length; e++) {
+          const ex = wallExplosions[e];
+          if (ex.age < 0) continue;
+          const fi = Math.min(
+            EXPLOSION_FRAME_COUNT - 1,
+            Math.floor(ex.age / EXPLOSION_FRAME_DT)
+          );
+          const dots = wallExplosionDotsCache[fi];
+          const s = ex.pixel != null ? ex.pixel : EXPLOSION_PIXEL;
+          const x = ex.x;
+          const y = ex.y;
+          for (let i = 0; i < dots.length; i++) {
+            const dx = dots[i][0];
+            const dy = dots[i][1];
+            const ci = dots[i][2];
+            ctx.fillStyle = EXPLOSION_PALETTE[ci] || EXPLOSION_PALETTE[3];
+            ctx.fillRect(
+              Math.round(x + dx * s - s / 2),
+              Math.round(y + dy * s - s / 2),
+              Math.max(1, Math.round(s)),
+              Math.max(1, Math.round(s))
+            );
+          }
+        }
+      }
+      const FIREBALL_SPEED = 620;
+      const MADNESS_HIT_DIST = 32;
+      const MADNESS_HITS_THRESHOLD = 70;
+      /** Сумма очков в матче (ты + они) ≥ этого значения → кнопка */
+      const MADNESS_SUM_SCORE_THRESHOLD = 5;
+      let waitingServe = true;
+      let humanHitCd = 0;
+      let botHitCd = [0, 0, 0];
+      /** Отскоки от пола на нижней половине без удара нашей команды (ты + нижний бот) */
+      let bottomBouncesNoTeam = 0;
+      /** Отскоки на верхней половине без удара соперников (два верхних бота) */
+      let topBouncesNoTeam = 0;
+
+      const ball = {
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
+        z: 0,
+        vz: 0,
+        active: false,
+        /** Подряд касаний стены без пола / удара ракеткой */
+        wallStreak: 0,
+        fireball: false,
+      };
+
+      /** Частицы и кольцо при ударе мяча о пол */
+      const floorBounceFx = [];
+      const DUST_COLORS = ['#e8f4ff', '#d4e8fc', '#c5ddfa', '#f2f8ff', '#b8d4f5'];
+
+      function spawnFloorBounceFx(x, y, impact) {
+        const imp = clamp(impact * 0.12, 28, 120);
+        const n = 11;
+        for (let i = 0; i < n; i++) {
+          const a = (Math.PI * 2 * i) / n + (Math.random() - 0.5) * 0.55;
+          const sp = imp * (0.45 + Math.random() * 0.65);
+          floorBounceFx.push({
+            kind: 'dust',
+            x,
+            y,
+            vx: Math.cos(a) * sp,
+            vy: Math.sin(a) * sp * 0.42,
+            life: 0.55 + Math.random() * 0.2,
+            size: Math.random() > 0.5 ? 2 : 3,
+            c: DUST_COLORS[(Math.random() * DUST_COLORS.length) | 0],
+          });
+        }
+        floorBounceFx.push({
+          kind: 'ring',
+          x,
+          y,
+          r: 5,
+          life: 0.5,
+          w: 2.5,
+        });
+      }
+
+      function updateFloorBounceFx(dt) {
+        for (let i = floorBounceFx.length - 1; i >= 0; i--) {
+          const p = floorBounceFx[i];
+          if (p.kind === 'ring') {
+            p.r += 95 * dt;
+            p.life -= dt * 1.65;
+            p.w *= 0.985;
+          } else {
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.vx *= 0.91;
+            p.vy *= 0.91;
+            p.vy += 35 * dt;
+            p.life -= dt * 1.9;
+          }
+          if (p.life <= 0) floorBounceFx.splice(i, 1);
+        }
+      }
+
+      function drawFloorBounceFx() {
+        for (const p of floorBounceFx) {
+          if (p.kind === 'ring') {
+            const a = clamp(p.life * 1.8, 0, 1);
+            ctx.strokeStyle = 'rgba(232, 244, 255, ' + (a * 0.55).toFixed(3) + ')';
+            ctx.lineWidth = Math.max(1, p.w);
+            ctx.beginPath();
+            ctx.ellipse(p.x, p.y, p.r, p.r * 0.36, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          } else {
+            const a = clamp(p.life * 2.2, 0, 1);
+            ctx.globalAlpha = a;
+            ctx.fillStyle = p.c;
+            const s = p.size;
+            ctx.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s);
+            ctx.globalAlpha = 1;
+          }
+        }
+      }
+
+      function ballVisualRadiusFromZ(z) {
+        const zz = Math.max(0, z);
+        return Math.min(BALL_R_Z_CAP, BALL_R_AT_Z0 + zz * BALL_R_PER_Z);
+      }
+
+      function getAimFromKeys() {
+        let ax = 0;
+        let ay = 0;
+        if (keys.ArrowLeft) ax -= 1;
+        if (keys.ArrowRight) ax += 1;
+        if (keys.ArrowUp) ay -= 1;
+        if (keys.ArrowDown) ay += 1;
+        if (ax === 0 && ay === 0) return { x: 0, y: -1 };
+        const len = Math.hypot(ax, ay);
+        return { x: ax / len, y: ay / len };
+      }
+
+      function clampBallToCourt() {
+        const r = BALL_R_PHYS;
+        const maxX =
+          ball.fireball || wallBreached
+            ? canvas.width - r - courtOriginX()
+            : innerRightPx - r;
+        ball.x = clamp(ball.x, innerLeftPx + r, maxX);
+        ball.y = clamp(ball.y, innerTopPx + r, innerBottomPx - r);
+      }
+
+      /** Ограничивает подъём и текущую высоту от √(vx²+vy²); при sp≈0 потолок 0 — мяч на полу */
+      function coupleBallVertToHoriz() {
+        if (ball.fireball) return;
+        const sp = Math.hypot(ball.vx, ball.vy);
+        const maxRiseVz = Math.min(VERT_VZ_MAX_CAP, sp * 0.78);
+        const maxZ = Math.min(VERT_Z_MAX_CAP, sp * 0.185);
+        if (ball.vz > maxRiseVz) {
+          ball.vz = maxRiseVz;
+        }
+        if (ball.z > maxZ) {
+          ball.z = maxZ;
+          if (ball.vz > 0) {
+            ball.vz = 0;
+          }
+        }
+      }
+
+      function reflectWalls() {
+        if (ball.fireball) return;
+        const r = BALL_R_PHYS;
+        let wallHits = 0;
+        let hitBackWall = false;
+        if (ball.x <= innerLeftPx + r) {
+          ball.x = innerLeftPx + r;
+          ball.vx = Math.abs(ball.vx) * WALL_SIDE_KEEP;
+          wallHits += 1;
+        }
+        if (ball.x >= innerRightPx - r) {
+          ball.x = innerRightPx - r;
+          ball.vx = -Math.abs(ball.vx) * WALL_SIDE_KEEP;
+          wallHits += 1;
+        }
+        if (ball.y <= innerTopPx + r) {
+          ball.y = innerTopPx + r;
+          ball.vy = Math.abs(ball.vy) * WALL_BACK_ALONG_KEEP;
+          wallHits += 1;
+          hitBackWall = true;
+        }
+        if (ball.y >= innerBottomPx - r) {
+          ball.y = innerBottomPx - r;
+          ball.vy = -Math.abs(ball.vy) * WALL_BACK_ALONG_KEEP;
+          wallHits += 1;
+          hitBackWall = true;
+        }
+        if (hitBackWall) {
+          ball.vy = clamp(ball.vy, -WALL_BACK_VY_CAP, WALL_BACK_VY_CAP);
+          if (ball.vz > 12) {
+            ball.vz *= WALL_BACK_VZ_UP_DAMP;
+          }
+        }
+        if (wallHits > 0) {
+          ball.vz *= WALL_VZ_DAMP;
+          if (ball.z > 0) {
+            ball.z *= WALL_Z_SHRINK;
+          }
+          if (ball.vz > 0) {
+            ball.vz *= WALL_KILL_UPWARD;
+            if (ball.z > 0) {
+              ball.z *= WALL_Z_IF_STILL_RISING;
+            }
+          }
+          ball.wallStreak += wallHits;
+          if (ball.wallStreak >= 2) {
+            ball.vx *= WALL_CHAIN_HORIZ_MUL;
+            ball.vy *= WALL_CHAIN_HORIZ_MUL;
+            let sp = Math.hypot(ball.vx, ball.vy);
+            if (sp > WALL_CHAIN_MAX_HORIZ) {
+              const k = WALL_CHAIN_MAX_HORIZ / sp;
+              ball.vx *= k;
+              ball.vy *= k;
+            }
+            ball.vz *= WALL_CHAIN_VZ_MUL;
+            ball.z *= WALL_CHAIN_Z_MUL;
+            ball.wallStreak = 0;
+          }
+        }
+      }
+
+      function onFloorBounce() {
+        if (ball.fireball) return;
+        if (waitingServe) return;
+        const onBottomHalf = ball.y >= yHalfSplitPx;
+        if (onBottomHalf) {
+          bottomBouncesNoTeam += 1;
+          if (bottomBouncesNoTeam >= 2) {
+            botScore += 1;
+            beginServePhase();
+          }
+        } else {
+          topBouncesNoTeam += 1;
+          if (topBouncesNoTeam >= 2) {
+            humanScore += 1;
+            beginServePhase();
+          }
+        }
+      }
+
+      function beginServePhase() {
+        waitingServe = true;
+        ball.active = false;
+        ball.vx = ball.vy = ball.vz = 0;
+        ball.z = 0;
+        ball.wallStreak = 0;
+        ball.fireball = false;
+        bottomBouncesNoTeam = 0;
+        topBouncesNoTeam = 0;
+        humanHitCd = 0;
+        botHitCd[0] = botHitCd[1] = botHitCd[2] = 0;
+        updateScoreUI();
+      }
+
+      function updateMadnessButton() {
+        const btn = document.getElementById('madnessBtn');
+        if (!btn) return;
+        const sumScore = humanScore + botScore;
+        const unlock =
+          !wallBreached &&
+          (totalRacketHits >= MADNESS_HITS_THRESHOLD ||
+            sumScore >= MADNESS_SUM_SCORE_THRESHOLD);
+        if (unlock) {
+          btn.classList.add('madness-btn--visible');
+          btn.setAttribute('aria-hidden', 'false');
+          if (!madnessSuperReady) {
+            btn.disabled = false;
+            btn.style.cursor = 'pointer';
+            btn.textContent = 'РЕЖИМ БЕЗУМИЯ';
+          }
+        } else {
+          btn.classList.remove('madness-btn--visible');
+          btn.setAttribute('aria-hidden', 'true');
+        }
+      }
+
+      function updateScoreUI() {
+        const el = document.getElementById('score');
+        if (el) el.textContent = 'Ты ' + humanScore + ' — Они ' + botScore;
+        updateMadnessButton();
+      }
+
+      function strikeBall(aimX, aimY, speed, addLift) {
+        const len = Math.hypot(aimX, aimY) || 1;
+        ball.vx = (aimX / len) * speed;
+        ball.vy = (aimY / len) * speed;
+        ball.vz = addLift;
+        ball.wallStreak = 0;
+        ball.fireball = false;
+        totalRacketHits += 1;
+        waitingServe = false;
+        ball.active = true;
+        updateMadnessButton();
+      }
+
+      function breachHitsWallRow(cy) {
+        if (!wallBreached) return false;
+        const midY = (cy + 0.5) * CELL;
+        return midY >= breachGapY0 && midY <= breachGapY1;
+      }
+
+      function launchMadnessFireball() {
+        const dx = madnessTargetX - ball.x;
+        const dy = madnessTargetY - ball.y;
+        const len = Math.hypot(dx, dy) || 1;
+        ball.vx = (dx / len) * FIREBALL_SPEED;
+        ball.vy = (dy / len) * FIREBALL_SPEED;
+        ball.vz = 110;
+        ball.z = 32;
+        ball.fireball = true;
+        ball.wallStreak = 0;
+        totalRacketHits += 1;
+        waitingServe = false;
+        ball.active = true;
+        updateMadnessButton();
+      }
+
+      function triggerMadnessImpact() {
+        wallBreached = true;
+        botsFleeing = true;
+        botsFrozen = false;
+        ball.fireball = false;
+        ball.active = false;
+        ball.vx = ball.vy = ball.vz = 0;
+        ball.z = 0;
+        ball.x = madnessTargetX;
+        ball.y = madnessTargetY;
+        breachGapY0 = madnessTargetY - innerHpx * 0.14;
+        breachGapY1 = madnessTargetY + innerHpx * 0.14;
+        spawnWallExplosionsAlongBreach();
+        const breachMidY = (breachGapY0 + breachGapY1) * 0.5;
+        const midY = breachMidY;
+        const step = Math.min(
+          24,
+          Math.max(8, (breachGapY1 - breachGapY0) * 0.22)
+        );
+        let fi = 0;
+        players.forEach((p) => {
+          if (p.human) return;
+          p.fled = false;
+          p.fleeEscapeY = clamp(
+            midY + (fi++ - 1) * step,
+            breachGapY0 + PLAYER_R + 6,
+            breachGapY1 - PLAYER_R - 6
+          );
+        });
+        updateMadnessButton();
+      }
+
+      function tryHumanHit(human) {
+        if (humanHitCd > 0) return false;
+        if (madnessSuperReady) {
+          const dist = Math.hypot(ball.x - human.x, ball.y - human.y);
+          const reach = PLAYER_R + HIT_REACH;
+          if (waitingServe) {
+            if (dist > reach + 20) return false;
+          } else {
+            if (dist > reach) return false;
+            if (ball.z > Z_HIT_MAX) return false;
+          }
+          launchMadnessFireball();
+          madnessSuperReady = false;
+          bottomBouncesNoTeam = 0;
+          humanHitCd = HIT_COOLDOWN;
+          return true;
+        }
+        const dist = Math.hypot(ball.x - human.x, ball.y - human.y);
+        if (dist > PLAYER_R + HIT_REACH) return false;
+        if (ball.z > Z_HIT_MAX) return false;
+        const aim = getAimFromKeys();
+        const spd = waitingServe ? SERVE_SPEED : HIT_SPEED;
+        strikeBall(aim.x, aim.y, spd, waitingServe ? 285 : 265);
+        bottomBouncesNoTeam = 0;
+        humanHitCd = HIT_COOLDOWN;
+        return true;
+      }
+
+      function tryBotHit(bot, botIdx) {
+        if (bot.fled) return false;
+        if (botsFrozen) return false;
+        if (ball.fireball) return false;
+        if (botHitCd[botIdx] > 0) return false;
+        const dist = Math.hypot(ball.x - bot.x, ball.y - bot.y);
+        if (dist > PLAYER_R + HIT_REACH * 0.95) return false;
+        if (ball.z > Z_HIT_MAX) return false;
+        const human = players.find((p) => p.human);
+        const toBottom = bot.partner === true;
+        let tx;
+        let ty;
+        if (toBottom) {
+          tx = innerLeftPx + innerWpx * (0.25 + Math.random() * 0.5);
+          ty = innerTopPx + innerHpx * (0.18 + Math.random() * 0.28);
+        } else {
+          tx = human.x + (Math.random() - 0.5) * 100;
+          ty =
+            yBottomHalfMinCenter +
+            (innerBottomPx - yBottomHalfMinCenter) * (0.32 + Math.random() * 0.48);
+        }
+        let ax = tx - ball.x;
+        let ay = ty - ball.y;
+        const len = Math.hypot(ax, ay) || 1;
+        ax /= len;
+        ay /= len;
+        strikeBall(
+          ax,
+          ay,
+          HIT_SPEED * (0.92 + Math.random() * 0.12),
+          248 + Math.random() * 45
+        );
+        if (toBottom) bottomBouncesNoTeam = 0;
+        else topBouncesNoTeam = 0;
+        botHitCd[botIdx] = BOT_HIT_COOLDOWN;
+        return true;
+      }
+
+      function updateBall(dt) {
+        humanHitCd = Math.max(0, humanHitCd - dt);
+        for (let i = 0; i < 3; i++) botHitCd[i] = Math.max(0, botHitCd[i] - dt);
+
+        const human = players.find((p) => p.human);
+        if (!human) return;
+
+        if (waitingServe) {
+          ball.x = human.x;
+          ball.y = human.y - 38;
+          ball.z = 0;
+          ball.vx = ball.vy = ball.vz = 0;
+          if (spacePressed) {
+            spacePressed = false;
+            tryHumanHit(human);
+          }
+          return;
+        }
+
+        if (!ball.active) return;
+
+        if (spacePressed) {
+          spacePressed = false;
+          tryHumanHit(human);
+        }
+
+        ball.vz -= GRAVITY * dt;
+        const zBefore = ball.z;
+        ball.z += ball.vz * dt;
+        ball.x += ball.vx * dt;
+        ball.y += ball.vy * dt;
+
+        if (ball.fireball) {
+          const rdx = ball.x - madnessTargetX;
+          const rdy = ball.y - madnessTargetY;
+          if (Math.hypot(rdx, rdy) < MADNESS_HIT_DIST) {
+            triggerMadnessImpact();
+            return;
+          }
+        }
+
+        reflectWalls();
+        clampBallToCourt();
+        coupleBallVertToHoriz();
+
+        if (
+          !ball.fireball &&
+          ball.z > 0 &&
+          ball.z <= Z_GROUND_SNAP &&
+          ball.vz > -22 &&
+          ball.vz <= 4
+        ) {
+          ball.z = 0;
+          ball.vz = 0;
+        }
+
+        if (ball.z <= 0) {
+          ball.z = 0;
+          if (ball.fireball) {
+            if (zBefore > 0.4 && ball.vz < -12) {
+              ball.vz = -ball.vz * 0.32 + 100;
+            } else {
+              ball.vz = 95;
+            }
+            ball.wallStreak = 0;
+          } else if (zBefore > 1.5 && ball.vz < -28) {
+            const impact = Math.abs(ball.vz);
+            spawnFloorBounceFx(ball.x, ball.y, impact);
+            const sp = Math.hypot(ball.vx, ball.vy);
+            const bounceHoriz = 0.18 + 0.82 * Math.min(1, sp / BOUNCE_HORIZ_REF);
+            ball.vz = -ball.vz * BOUNCE_Z * bounceHoriz;
+            const maxUpAfterBounce = clamp(sp * 0.9, 14, VERT_VZ_MAX_CAP);
+            if (ball.vz > maxUpAfterBounce) {
+              ball.vz = maxUpAfterBounce;
+            }
+            ball.wallStreak = 0;
+            onFloorBounce();
+          } else {
+            ball.vz = 0;
+            ball.wallStreak = 0;
+          }
+        }
+
+        if (waitingServe) return;
+
+        if (ball.active && !botsFrozen) {
+          let bi = 0;
+          for (let pi = 0; pi < players.length; pi++) {
+            const p = players[pi];
+            if (p.human) continue;
+            if (p.fled) {
+              bi += 1;
+              continue;
+            }
+            if (tryBotHit(p, bi)) break;
+            bi += 1;
+          }
+        }
+      }
+
+      function drawBall() {
+        const r = ballVisualRadiusFromZ(ball.z);
+        const lift = ball.z * 0.14;
+        const cy = ball.y - lift - r * 0.25;
+
+        if (ball.fireball) {
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          ctx.fillStyle = '#ff5500';
+          ctx.beginPath();
+          ctx.arc(ball.x, cy, r * 1.45, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 0.45;
+          ctx.fillStyle = '#ffcc00';
+          ctx.beginPath();
+          ctx.arc(ball.x + r * 0.12, cy - r * 0.08, r * 1.05, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          const fg = ctx.createRadialGradient(
+            ball.x - r * 0.25,
+            cy - r * 0.25,
+            0,
+            ball.x,
+            cy,
+            r * 1.2
+          );
+          fg.addColorStop(0, '#ffffff');
+          fg.addColorStop(0.3, '#fff44d');
+          fg.addColorStop(0.65, '#ff6600');
+          fg.addColorStop(1, '#8b0000');
+          ctx.fillStyle = fg;
+          ctx.beginPath();
+          ctx.arc(ball.x, cy, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#ffdd88';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          return;
+        }
+
+        ctx.fillStyle = 'rgba(12, 28, 48, 0.38)';
+        ctx.beginPath();
+        ctx.ellipse(ball.x, ball.y, r * 0.9, Math.max(2, r * 0.32), 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        const g = ctx.createRadialGradient(
+          ball.x - r * 0.35,
+          cy - r * 0.35,
+          0,
+          ball.x,
+          cy,
+          r * 1.2
+        );
+        g.addColorStop(0, '#fffce0');
+        g.addColorStop(0.4, '#ffe22a');
+        g.addColorStop(1, '#d4a800');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(ball.x, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#9a7200';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      const GIFT_BOX = 64;
+
+      function layoutGiftRoomSize() {
+        giftRoomW = Math.min(760, Math.max(400, canvas.width - 64));
+        giftRoomH = Math.min(620, Math.max(300, canvas.height - 64));
+      }
+
+      function buildGiftPile() {
+        giftBoxes = [];
+        const cx = giftRoomW * 0.5;
+        const baseY = giftRoomH * 0.54;
+        const hues = [348, 28, 200, 42, 145, 262, 32, 18, 180, 310, 55, 202];
+        const offs = [
+          [0, 0],
+          [-36, 24], [40, 22],
+          [-70, 46], [6, 42], [74, 44],
+          [-34, 68], [38, 66],
+          [-62, 74], [64, 72],
+          [2, 80],
+          [-92, 84], [96, 82],
+        ];
+        for (let i = 0; i < offs.length; i++) {
+          giftBoxes.push({
+            x: Math.round(cx - GIFT_BOX / 2 + offs[i][0]),
+            y: Math.round(baseY + offs[i][1]),
+            boxColor: 'hsl(' + hues[i % hues.length] + ', 58%, ' + (44 + (i % 3)) + '%)',
+          });
+        }
+        giftBoxes.sort((a, b) => a.y - b.y);
+      }
+
+      function drawGiftPlaceholder(g) {
+        const x = g.x;
+        const y = g.y;
+        const w = GIFT_BOX;
+        const h = GIFT_BOX;
+        ctx.fillStyle = g.boxColor;
+        ctx.fillRect(x, y, w, h);
+        ctx.fillStyle = 'rgba(255, 248, 240, 0.4)';
+        ctx.fillRect(x + 6, y + 6, w - 12, 14);
+        ctx.fillStyle = '#f5ebe0';
+        ctx.fillRect(x + 28, y, 8, h);
+        ctx.fillRect(x, y + 28, w, 8);
+        ctx.strokeStyle = '#241c28';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+      }
+
+      function enterGiftRoom() {
+        if (inGiftRoom) return;
+        inGiftRoom = true;
+        document.body.classList.add('gift-room');
+        layoutGiftRoomSize();
+        buildGiftPile();
+        const hu = players.find((q) => q.human);
+        if (hu) {
+          hu.x = giftRoomW * 0.5;
+          hu.y = giftRoomH * 0.5;
+          hu.angle = -Math.PI / 2;
+        }
+      }
+
+      function drawGiftRoom() {
+        ctx.fillStyle = '#121018';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const rox = Math.floor((canvas.width - giftRoomW) / 2);
+        const roy = Math.floor((canvas.height - giftRoomH) / 2);
+        ctx.save();
+        ctx.translate(rox, roy);
+        const floorGrad = ctx.createLinearGradient(0, 0, 0, giftRoomH);
+        floorGrad.addColorStop(0, '#4a3d52');
+        floorGrad.addColorStop(0.45, '#5c4d68');
+        floorGrad.addColorStop(1, '#3d3348');
+        ctx.fillStyle = floorGrad;
+        ctx.fillRect(0, 0, giftRoomW, giftRoomH);
+        ctx.fillStyle = '#6b5a78';
+        ctx.fillRect(16, 16, giftRoomW - 32, giftRoomH - 32);
+        ctx.fillStyle = '#524665';
+        ctx.fillRect(28, 28, giftRoomW - 56, giftRoomH - 56);
+        ctx.strokeStyle = '#8a7898';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(1.5, 1.5, giftRoomW - 3, giftRoomH - 3);
+        ctx.strokeStyle = '#2a2230';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(26.5, 26.5, giftRoomW - 53, giftRoomH - 53);
+        for (let i = 0; i < giftBoxes.length; i++) {
+          drawGiftPlaceholder(giftBoxes[i]);
+        }
+        const hu = players.find((q) => q.human);
+        if (hu) {
+          drawPlayerFigure(hu);
+        }
+        ctx.restore();
+      }
+
+      function drawWorld() {
+        if (inGiftRoom) {
+          drawGiftRoom();
+          return;
+        }
+        ctx.fillStyle = '#1a1e24';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const ox = courtOriginX();
+        const oy = courtOriginY();
+        if (wallBreached && ox + BASE_CANVAS_W < canvas.width) {
+          ctx.fillStyle = '#05070c';
+          ctx.fillRect(ox + BASE_CANVAS_W, oy, canvas.width - ox - BASE_CANVAS_W, COURT_H_PX);
+        }
+        if (
+          wallBreached &&
+          wallExplosions.length === 0 &&
+          ox + BASE_CANVAS_W < canvas.width
+        ) {
+          const x0 = ox + BASE_CANVAS_W;
+          const cw = canvas.width - x0;
+          const y0 = oy + breachGapY0;
+          const ch = breachGapY1 - breachGapY0;
+          if (cw > 0 && ch > 2) {
+            const border = 2;
+            ctx.fillStyle = '#1a080a';
+            ctx.fillRect(x0, y0 - border, cw, border);
+            ctx.fillRect(x0, y0 + ch, cw, border);
+            const carpetBase = '#822032';
+            const carpetSpeck = '#4a1018';
+            ctx.fillStyle = carpetBase;
+            ctx.fillRect(x0, y0, cw, ch);
+            ctx.fillStyle = carpetSpeck;
+            const step = 4;
+            for (let py = 0; py < ch; py += step) {
+              for (let px = 0; px < cw; px += step) {
+                const sx = (x0 + px) | 0;
+                const sy = (y0 + py) | 0;
+                const h = ((sx * 7919 + sy * 2137 + sx * sy * 17) >>> 0) % 100;
+                if (h >= 12) continue;
+                const ox = (h % 3) | 0;
+                const oy = ((h >> 2) % 3) | 0;
+                ctx.fillRect(sx + ox, sy + oy, 2, 2);
+              }
+            }
+            const carpetArrow = '#a8485c';
+            const cyArrow = Math.round(y0 + ch * 0.5);
+            const spacing = Math.max(56, Math.min(92, Math.floor(cw * 0.16)));
+            const arrowW = 22;
+            function fillRightArrowPixel(ax, cy) {
+              ctx.fillStyle = carpetArrow;
+              const pts = [
+                [0, -2],
+                [0, 0],
+                [0, 2],
+                [2, -2],
+                [2, 0],
+                [2, 2],
+                [4, -2],
+                [4, 0],
+                [4, 2],
+                [6, -2],
+                [6, 0],
+                [6, 2],
+                [8, -2],
+                [8, 0],
+                [8, 2],
+                [10, -4],
+                [10, -2],
+                [10, 0],
+                [10, 2],
+                [10, 4],
+                [12, -4],
+                [12, -2],
+                [12, 0],
+                [12, 2],
+                [12, 4],
+                [14, -2],
+                [14, 0],
+                [14, 2],
+                [16, 0],
+              ];
+              for (let i = 0; i < pts.length; i++) {
+                ctx.fillRect(ax + pts[i][0], cy + pts[i][1], 2, 2);
+              }
+            }
+            for (
+              let ax = Math.round(x0 + spacing * 0.45);
+              ax < x0 + cw - arrowW;
+              ax += spacing
+            ) {
+              fillRightArrowPixel(ax, cyArrow);
+            }
+            ctx.strokeStyle = '#3a0e14';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x0 + 0.5, y0 + 0.5, cw - 1, ch - 1);
+          }
+        }
+        ctx.save();
+        ctx.translate(ox, oy);
+        drawCourt();
+        drawWallExplosion();
+        drawFloorBounceFx();
+        const order = [...players].sort((a, b) => a.y - b.y);
+        order.forEach((p) => {
+          if (p.fled) return;
+          drawPlayerFigure(p);
+        });
+        if (waitingServe || ball.active) {
+          drawBall();
+        }
+        ctx.restore();
+      }
+
+      function cellRect(cx, cy, cw, ch) {
+        return {
+          x: cx * CELL,
+          y: cy * CELL,
+          w: cw * CELL,
+          h: ch * CELL,
+        };
+      }
+
+      function fillCell(cx, cy, color) {
+        const r = cellRect(cx, cy, 1, 1);
+        ctx.fillStyle = color;
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+      }
+
+      function drawTurf() {
+        const px0 = WALL_CELLS * CELL;
+        const py0 = WALL_CELLS * CELL;
+        const pw = INNER_W * CELL;
+        const ph = INNER_H * CELL;
+        ctx.fillStyle = palette.courtBlue;
+        ctx.fillRect(px0, py0, pw, ph);
+        ctx.fillStyle = palette.courtSpeck;
+        for (let y = 0; y < INNER_H; y++) {
+          for (let x = 0; x < INNER_W; x++) {
+            const h = ((x * 7919 + y * 2137 + x * y * 17) >>> 0) % 100;
+            if (h >= 12) continue;
+            const ox = (h % 3) | 0;
+            const oy = ((h >> 2) % 3) | 0;
+            ctx.fillRect(px0 + x * CELL + ox, py0 + y * CELL + oy, 2, 2);
+          }
+        }
+        if (wallBreached) {
+          const crackX = px0 + pw * 0.78;
+          ctx.fillStyle = 'rgba(25, 40, 62, 0.5)';
+          ctx.fillRect(crackX, py0, pw * 0.22, ph);
+          ctx.strokeStyle = 'rgba(15, 22, 38, 0.85)';
+          ctx.lineWidth = 1;
+          for (let k = 0; k < 14; k++) {
+            const t = k * 1109 + 17;
+            const x1 = crackX + (t % 40);
+            const y1 = py0 + ((t * 7) % Math.max(1, ph - 24));
+            const x2 = crackX + ((t * 13) % 48);
+            const y2 = py0 + ((t * 11) % Math.max(1, ph - 8));
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+          }
+        }
+      }
+
+      function drawWalls() {
+        for (let cy = 0; cy < H; cy++) {
+          for (let cx = 0; cx < W; cx++) {
+            const onLeft = cx < WALL_CELLS;
+            const onRight = cx >= W - WALL_CELLS;
+            const onTop = cy < WALL_CELLS;
+            const onBottom = cy >= H - WALL_CELLS;
+            if (!onLeft && !onRight && !onTop && !onBottom) continue;
+
+            if (
+              wallBreached &&
+              onRight &&
+              !onTop &&
+              !onBottom &&
+              breachHitsWallRow(cy)
+            ) {
+              fillCell(cx, cy, '#030508');
+              continue;
+            }
+
+            const isCorner = (onLeft || onRight) && (onTop || onBottom);
+            const base = isCorner ? palette.wallDark : palette.wallBase;
+            fillCell(cx, cy, base);
+
+            if ((cx + cy) % 2 === 0) {
+              fillCell(cx, cy, palette.wallMesh);
+            }
+            if ((cx * 3 + cy * 5) % 7 === 0) {
+              fillCell(cx, cy, palette.wallLight);
+            }
+          }
+        }
+
+        const r = cellRect(WALL_CELLS, WALL_CELLS, INNER_W, INNER_H);
+        ctx.strokeStyle = palette.wallLight;
+        ctx.lineWidth = CELL;
+        ctx.strokeRect(r.x + CELL / 2, r.y + CELL / 2, r.w - CELL, r.h - CELL);
+
+        function bounceChevron(px, py, dir) {
+          ctx.fillStyle = palette.bounceAccent;
+          const s = Math.max(1, Math.floor(CELL / 4));
+          const ox = px * CELL;
+          const oy = py * CELL;
+          ctx.save();
+          ctx.translate(ox + CELL / 2, oy + CELL / 2);
+          if (dir === 'right') ctx.rotate(0);
+          else if (dir === 'down') ctx.rotate(Math.PI / 2);
+          else if (dir === 'left') ctx.rotate(Math.PI);
+          else if (dir === 'up') ctx.rotate(-Math.PI / 2);
+          ctx.beginPath();
+          ctx.moveTo(-s, -s);
+          ctx.lineTo(s, 0);
+          ctx.lineTo(-s, s);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = palette.bounceDark;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        for (let i = 0; i < INNER_H; i += 4) {
+          bounceChevron(WALL_CELLS - 1, WALL_CELLS + i, 'right');
+          const row = WALL_CELLS + i;
+          if (!wallBreached || !breachHitsWallRow(row)) {
+            bounceChevron(WALL_CELLS + INNER_W, row, 'left');
+          }
+        }
+        for (let j = 0; j < INNER_W; j += 4) {
+          bounceChevron(WALL_CELLS + j, WALL_CELLS - 1, 'down');
+          bounceChevron(WALL_CELLS + j, WALL_CELLS + INNER_H, 'up');
+        }
+      }
+
+      function drawLineCells(x0, y0, w, h, color) {
+        for (let yy = 0; yy < h; yy++) {
+          for (let xx = 0; xx < w; xx++) {
+            fillCell(x0 + xx, y0 + yy, color);
+          }
+        }
+      }
+
+      function drawCourtLines() {
+        const x0 = WALL_CELLS;
+        const y0 = WALL_CELLS;
+        const midY = y0 + INNER_H / 2;
+        const midX = x0 + INNER_W / 2;
+
+        const halfLen = INNER_H / 2;
+        const serviceOffset = (SERVICE_FROM_NET_M / (M_H / 2)) * halfLen;
+        const yServiceTop = midY - serviceOffset;
+        const yServiceBot = midY + serviceOffset;
+
+        const lineW = Math.max(1, Math.round(0.05 * (INNER_W / M_W)));
+
+        drawLineCells(
+          Math.floor(midX) - Math.floor(lineW / 2),
+          y0,
+          lineW,
+          INNER_H,
+          palette.line
+        );
+
+        drawLineCells(
+          x0,
+          Math.floor(yServiceTop) - Math.floor(lineW / 2),
+          INNER_W,
+          lineW,
+          palette.line
+        );
+        drawLineCells(
+          x0,
+          Math.floor(yServiceBot) - Math.floor(lineW / 2),
+          INNER_W,
+          lineW,
+          palette.line
+        );
+      }
+
+      function drawNet() {
+        const x0 = WALL_CELLS;
+        const y0 = WALL_CELLS;
+        const midY = y0 + INNER_H / 2;
+        const netHalf = netHalfRows;
+
+        for (let dy = -netHalf; dy <= netHalf; dy++) {
+          const cy = Math.floor(midY) + dy;
+          for (let x = 0; x < INNER_W; x++) {
+            const cx = x0 + x;
+            const mesh = (x + dy) % 3 === 0;
+            fillCell(cx, cy, mesh ? palette.netWhite : palette.netShadow);
+          }
+        }
+        for (let dy = -netHalf - 1; dy <= netHalf + 1; dy++) {
+          fillCell(x0, Math.floor(midY) + dy, palette.netPost);
+          fillCell(x0 + INNER_W - 1, Math.floor(midY) + dy, palette.netPost);
+        }
+      }
+
+      function drawCourt() {
+        drawWalls();
+        drawTurf();
+        drawCourtLines();
+        drawNet();
+      }
+
+      /** Статичные PNG (без поворота); при ошибке загрузки — пиксельная заглушка с angle. */
+      function drawPlayerFigurePixelFallback(p) {
+        const px = Math.round(p.x);
+        const py = Math.round(p.y);
+        const s = FIG_SCALE;
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(p.angle);
+        const b = (lx, ly, lw, lh, c) => {
+          ctx.fillStyle = c;
+          ctx.fillRect(lx * s, ly * s, lw * s, lh * s);
+        };
+        b(-2, -8, 4, 4, p.skin);
+        b(-1, -4, 2, 6, p.shirt);
+        b(-2, 2, 4, 3, p.shorts);
+        b(-1, 5, 2, 3, p.skin);
+        b(3, -1, 2, 6, p.racket);
+        b(5, 0, 1, 4, '#2a2420');
+        ctx.restore();
+      }
+
+      function drawPlayerFigure(p) {
+        const img = p.human ? imgPlayerSprite : imgBotSprite;
+        if (img && img.complete && img.naturalWidth > 0) {
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
+          ctx.drawImage(
+            img,
+            Math.round(p.x - w / 2),
+            Math.round(p.y - h / 2),
+            w,
+            h
+          );
+          return;
+        }
+        drawPlayerFigurePixelFallback(p);
+      }
+
+      function clamp(v, lo, hi) {
+        return Math.max(lo, Math.min(hi, v));
+      }
+
+      /** Боты при побеге: вся площадка по Y, выход через разлом как у человека */
+      function clampBotFlee(p) {
+        let maxX = innerRightPx - PLAYER_R;
+        let minY = innerTopPx + PLAYER_R;
+        let maxY = innerBottomPx - PLAYER_R;
+        const inGap =
+          p.y >= breachGapY0 - PLAYER_R * 0.9 &&
+          p.y <= breachGapY1 + PLAYER_R * 0.9;
+        const nearRightForGap = p.x > innerRightPx - 120;
+        const pastWall = p.x >= innerRightPx - PLAYER_R - 2;
+        if (pastWall || (inGap && nearRightForGap)) {
+          const oxx = courtOriginX();
+          const oyy = courtOriginY();
+          maxX = canvas.width - PLAYER_R - oxx;
+          minY = PLAYER_R - oyy;
+          maxY = canvas.height - PLAYER_R - oyy;
+        }
+        p.x = clamp(p.x, innerLeftPx + PLAYER_R, maxX);
+        p.y = clamp(p.y, minY, maxY);
+      }
+
+      function clampHuman(p) {
+        let maxX = innerRightPx - PLAYER_R;
+        let minY = yBottomHalfMinCenter;
+        let maxY = innerBottomPx - PLAYER_R;
+        if (wallBreached) {
+          const inGapBand =
+            p.y >= breachGapY0 - PLAYER_R * 0.9 &&
+            p.y <= breachGapY1 + PLAYER_R * 0.9;
+          const nearRightForGap = p.x > innerRightPx - 100;
+          const pastWall = p.x >= innerRightPx - PLAYER_R - 2;
+          if (pastWall || (inGapBand && nearRightForGap)) {
+            const oxx = courtOriginX();
+            const oyy = courtOriginY();
+            maxX = canvas.width - PLAYER_R - oxx;
+            minY = PLAYER_R - oyy;
+            maxY = canvas.height - PLAYER_R - oyy;
+          }
+        }
+        p.x = clamp(p.x, innerLeftPx + PLAYER_R, maxX);
+        p.y = clamp(p.y, minY, maxY);
+      }
+
+      function clampToRect(p, left, top, right, bottom) {
+        p.x = clamp(p.x, left + PLAYER_R, right - PLAYER_R);
+        p.y = clamp(p.y, top + PLAYER_R, bottom - PLAYER_R);
+      }
+
+      /** Четверти: верх лево/право, низ право (бот-партнёр); человек — вся нижняя половина */
+      const bounds = {
+        topLeft: {
+          left: innerLeftPx,
+          top: innerTopPx,
+          right: midXPx,
+          bottom: yTopHalfMaxCenter + PLAYER_R,
+        },
+        topRight: {
+          left: midXPx,
+          top: innerTopPx,
+          right: innerRightPx,
+          bottom: yTopHalfMaxCenter + PLAYER_R,
+        },
+        bottomRight: {
+          left: midXPx,
+          top: yBottomHalfMinCenter - PLAYER_R,
+          right: innerRightPx,
+          bottom: innerBottomPx,
+        },
+      };
+
+      function pickBotTarget(bot) {
+        const b = bot.quarter;
+        bot.targetX = b.left + PLAYER_R + Math.random() * (b.right - b.left - 2 * PLAYER_R);
+        bot.targetY = b.top + PLAYER_R + Math.random() * (b.bottom - b.top - 2 * PLAYER_R);
+      }
+
+      const players = [
+        {
+          x: innerLeftPx + innerWpx * 0.25,
+          y: innerTopPx + (yTopHalfMaxCenter - innerTopPx) * 0.55,
+          angle: Math.PI / 2,
+          human: false,
+          fled: false,
+          fleeEscapeY: 0,
+          quarter: bounds.topLeft,
+          targetX: 0,
+          targetY: 0,
+          skin: '#e8c4a8',
+          shirt: '#c45c4a',
+          shorts: '#3a3a4a',
+          racket: '#8b7355',
+        },
+        {
+          x: innerLeftPx + innerWpx * 0.75,
+          y: innerTopPx + (yTopHalfMaxCenter - innerTopPx) * 0.5,
+          angle: Math.PI / 2,
+          human: false,
+          fled: false,
+          fleeEscapeY: 0,
+          quarter: bounds.topRight,
+          targetX: 0,
+          targetY: 0,
+          skin: '#d4a574',
+          shirt: '#b84a6e',
+          shorts: '#2f3540',
+          racket: '#6b5344',
+        },
+        {
+          x: midXPx + innerWpx * 0.22,
+          y: yBottomHalfMinCenter + (innerBottomPx - yBottomHalfMinCenter) * 0.45,
+          angle: -Math.PI / 2,
+          human: false,
+          fled: false,
+          fleeEscapeY: 0,
+          partner: true,
+          quarter: bounds.bottomRight,
+          targetX: 0,
+          targetY: 0,
+          skin: '#c9a882',
+          shirt: '#4a6eb8',
+          shorts: '#2a3038',
+          racket: '#7a6048',
+        },
+        {
+          x: innerLeftPx + innerWpx * 0.5,
+          y: yBottomHalfMinCenter + (innerBottomPx - yBottomHalfMinCenter) * 0.62,
+          angle: -Math.PI / 2,
+          human: true,
+          quarter: null,
+          skin: '#f0d4b8',
+          shirt: '#3d7a52',
+          shorts: '#2c3238',
+          racket: '#5c4a3a',
+        },
+      ];
+
+      players.forEach((p) => {
+        if (!p.human) pickBotTarget(p);
+      });
+
+      let lastBotRetarget = 0;
+
+      function updateBots(dt) {
+        if (botsFleeing) {
+          const escapeX = BASE_CANVAS_W + 150;
+          players.forEach((p) => {
+            if (p.human || p.fled) return;
+            const ty = p.fleeEscapeY;
+            const dx = escapeX - p.x;
+            const dy = ty - p.y;
+            const len = Math.hypot(dx, dy) || 1;
+            const step = BOT_FLEE_SPEED * dt;
+            p.x += (dx / len) * step;
+            p.y += (dy / len) * step;
+            clampBotFlee(p);
+            p.angle = Math.atan2(dy, dx);
+            if (p.x >= BASE_CANVAS_W + PLAYER_R * 0.6) {
+              p.fled = true;
+            }
+          });
+          if (players.every((q) => q.human || q.fled)) {
+            botsFleeing = false;
+            botsFrozen = true;
+          }
+          return;
+        }
+        if (botsFrozen) return;
+        lastBotRetarget += dt;
+        if (lastBotRetarget > 2.2) {
+          lastBotRetarget = 0;
+          players.forEach((p) => {
+            if (!p.human && !p.fled) pickBotTarget(p);
+          });
+        }
+
+        players.forEach((p) => {
+          if (p.human || p.fled) return;
+          const b = p.quarter;
+          const dx = p.targetX - p.x;
+          const dy = p.targetY - p.y;
+          const len = Math.hypot(dx, dy) || 1;
+          const step = BOT_SPEED * dt;
+          if (len < 18) {
+            pickBotTarget(p);
+            return;
+          }
+          p.x += (dx / len) * step;
+          p.y += (dy / len) * step;
+          clampToRect(p, b.left, b.top, b.right, b.bottom);
+          p.angle = Math.atan2(dy, dx);
+        });
+      }
+
+      function updateHuman(dt) {
+        const p = players.find((x) => x.human);
+        if (!p) return;
+        let dx = 0;
+        let dy = 0;
+        if (keys.ArrowLeft) dx -= 1;
+        if (keys.ArrowRight) dx += 1;
+        if (keys.ArrowUp) dy -= 1;
+        if (keys.ArrowDown) dy += 1;
+        if (dx !== 0 && dy !== 0) {
+          dx *= 0.7071;
+          dy *= 0.7071;
+        }
+        if (inGiftRoom) {
+          p.x += dx * HUMAN_SPEED * dt;
+          p.y += dy * HUMAN_SPEED * dt;
+          p.x = clamp(p.x, PLAYER_R, giftRoomW - PLAYER_R);
+          p.y = clamp(p.y, PLAYER_R, giftRoomH - PLAYER_R);
+          if (dx !== 0 || dy !== 0) {
+            p.angle = Math.atan2(dy, dx);
+          }
+          return;
+        }
+        p.x += dx * HUMAN_SPEED * dt;
+        p.y += dy * HUMAN_SPEED * dt;
+        clampHuman(p);
+        if (
+          wallBreached &&
+          p.x + courtOriginX() >= canvas.width - PLAYER_R - 10
+        ) {
+          enterGiftRoom();
+          return;
+        }
+        if (dx !== 0 || dy !== 0) {
+          p.angle = Math.atan2(dy, dx);
+        }
+      }
+
+      let lastT = performance.now();
+      function frame(now) {
+        const dt = Math.min(0.05, (now - lastT) / 1000);
+        lastT = now;
+        updateHuman(dt);
+        if (!inGiftRoom) {
+          updateBots(dt);
+          updateBall(dt);
+          updateFloorBounceFx(dt);
+          updateWallExplosion(dt);
+        }
+        drawWorld();
+        requestAnimationFrame(frame);
+      }
+
+      window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space') {
+          spacePressed = true;
+          e.preventDefault();
+          return;
+        }
+        if (keys.hasOwnProperty(e.code)) {
+          keys[e.code] = true;
+          e.preventDefault();
+        }
+      });
+      window.addEventListener('keyup', (e) => {
+        if (keys.hasOwnProperty(e.code)) {
+          keys[e.code] = false;
+          e.preventDefault();
+        }
+      });
+
+      document.getElementById('madnessBtn')?.addEventListener('click', function () {
+        const btn = document.getElementById('madnessBtn');
+        if (!btn || !btn.classList.contains('madness-btn--visible')) return;
+        if (wallBreached || madnessSuperReady) return;
+        madnessSuperReady = true;
+        btn.textContent = 'Супер-удар! Пробел у мяча';
+        btn.disabled = true;
+        btn.style.cursor = 'default';
+      });
+
+      updateScoreUI();
+      loadPlayerSprites();
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
