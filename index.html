@@ -135,12 +135,7 @@
       opacity: 0;
       visibility: hidden;
       pointer-events: none;
-      transition: opacity 0.2s ease, visibility 0.2s ease;
-    }
-    body.gift-room .hud-sidebar {
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.35s ease;
+      transition: opacity 0.3s ease, visibility 0.3s ease;
     }
     @media (max-width: 620px) {
       .hud-sidebar {
@@ -171,7 +166,7 @@
       <p class="score" id="score">Ты 0 — Они 0</p>
       <p class="hint" id="hintText">
         Бегай стрелками · <strong>Пробел</strong> — подача и удар.
-        Выиграй, чтобы получить подарок
+        Выиграй, чтобы получить подарки.
       </p>
       <button type="button" class="madness-btn" id="madnessBtn" aria-hidden="true">
         РЕЖИМ БЕЗУМИЯ
@@ -200,8 +195,13 @@
       let inGiftRoom = false;
       let giftRoomW = 640;
       let giftRoomH = 480;
-      /** Заглушки подарков 64×64 в координатах комнаты */
-      let giftBoxes = [];
+      const CARD_SIZE = 64;
+      let giftChest = { cx: 0, cy: 0, bodyW: 104, bodyH: 46, lidH: 20 };
+      let chestOpened = false;
+      /** Анимация карточек: sx,sy старт, tx,ty финиш, t 0..1 */
+      let rewardCards = null;
+      /** Область клика «Открыть» в координатах комнаты */
+      let openChestHitRoom = { x: 0, y: 0, w: 0, h: 0 };
 
       function courtOriginX() {
         return Math.max(0, Math.floor((canvas.width - BASE_CANVAS_W) / 2));
@@ -216,7 +216,7 @@
         canvas.height = window.innerHeight;
         if (inGiftRoom) {
           layoutGiftRoomSize();
-          buildGiftPile();
+          layoutGiftRoomProps();
           const hu = players.find((q) => q.human);
           if (hu) {
             hu.x = clamp(hu.x, PLAYER_R, giftRoomW - PLAYER_R);
@@ -249,6 +249,22 @@
           imgBotSprite = null;
         };
         ib.src = 'bot.png';
+      }
+
+      const imgPresentSprites = [null, null, null];
+
+      function loadPresentSprites() {
+        for (let i = 0; i < 3; i++) {
+          const im = new Image();
+          const idx = i;
+          im.onload = function () {
+            imgPresentSprites[idx] = im;
+          };
+          im.onerror = function () {
+            imgPresentSprites[idx] = null;
+          };
+          im.src = 'present_' + (i + 1) + '.png';
+        }
       }
 
       const palette = {
@@ -474,6 +490,8 @@
       const MADNESS_HITS_THRESHOLD = 70;
       /** Сумма очков в матче (ты + они) ≥ этого значения → кнопка */
       const MADNESS_SUM_SCORE_THRESHOLD = 5;
+      /** true — кнопка безумия всегда видна (для отладки) */
+      const MADNESS_DEBUG_ALWAYS_UNLOCK = true;
       let waitingServe = true;
       let humanHitCd = 0;
       let botHitCd = [0, 0, 0];
@@ -709,12 +727,19 @@
         const sumScore = humanScore + botScore;
         const unlock =
           !wallBreached &&
-          (totalRacketHits >= MADNESS_HITS_THRESHOLD ||
+          (MADNESS_DEBUG_ALWAYS_UNLOCK ||
+            totalRacketHits >= MADNESS_HITS_THRESHOLD ||
             sumScore >= MADNESS_SUM_SCORE_THRESHOLD);
         if (unlock) {
           btn.classList.add('madness-btn--visible');
           btn.setAttribute('aria-hidden', 'false');
-          if (!madnessSuperReady) {
+          if (MADNESS_DEBUG_ALWAYS_UNLOCK) {
+            btn.disabled = false;
+            btn.style.cursor = 'pointer';
+            if (!madnessSuperReady) {
+              btn.textContent = 'РЕЖИМ БЕЗУМИЯ';
+            }
+          } else if (!madnessSuperReady) {
             btn.disabled = false;
             btn.style.cursor = 'pointer';
             btn.textContent = 'РЕЖИМ БЕЗУМИЯ';
@@ -944,6 +969,7 @@
           } else {
             ball.vz = 0;
             ball.wallStreak = 0;
+            if (zBefore > 0) onFloorBounce();
           }
         }
 
@@ -1029,60 +1055,167 @@
         ctx.stroke();
       }
 
-      const GIFT_BOX = 64;
-
       function layoutGiftRoomSize() {
         giftRoomW = Math.min(760, Math.max(400, canvas.width - 64));
         giftRoomH = Math.min(620, Math.max(300, canvas.height - 64));
       }
 
-      function buildGiftPile() {
-        giftBoxes = [];
-        const cx = giftRoomW * 0.5;
-        const baseY = giftRoomH * 0.54;
-        const hues = [348, 28, 200, 42, 145, 262, 32, 18, 180, 310, 55, 202];
-        const offs = [
-          [0, 0],
-          [-36, 24], [40, 22],
-          [-70, 46], [6, 42], [74, 44],
-          [-34, 68], [38, 66],
-          [-62, 74], [64, 72],
-          [2, 80],
-          [-92, 84], [96, 82],
-        ];
-        for (let i = 0; i < offs.length; i++) {
-          giftBoxes.push({
-            x: Math.round(cx - GIFT_BOX / 2 + offs[i][0]),
-            y: Math.round(baseY + offs[i][1]),
-            boxColor: 'hsl(' + hues[i % hues.length] + ', 58%, ' + (44 + (i % 3)) + '%)',
-          });
-        }
-        giftBoxes.sort((a, b) => a.y - b.y);
+      function layoutGiftRoomProps() {
+        giftChest.cx = giftRoomW * 0.5;
+        giftChest.cy = giftRoomH * 0.58;
       }
 
-      function drawGiftPlaceholder(g) {
-        const x = g.x;
-        const y = g.y;
-        const w = GIFT_BOX;
-        const h = GIFT_BOX;
-        ctx.fillStyle = g.boxColor;
-        ctx.fillRect(x, y, w, h);
-        ctx.fillStyle = 'rgba(255, 248, 240, 0.4)';
-        ctx.fillRect(x + 6, y + 6, w - 12, 14);
-        ctx.fillStyle = '#f5ebe0';
-        ctx.fillRect(x + 28, y, 8, h);
-        ctx.fillRect(x, y + 28, w, 8);
-        ctx.strokeStyle = '#241c28';
+      function playerNearChest(p) {
+        const c = giftChest;
+        const halfW = c.bodyW * 0.5 + PLAYER_R + 38;
+        const halfH = c.bodyH * 0.5 + c.lidH + PLAYER_R + 38;
+        return (
+          Math.abs(p.x - c.cx) < halfW && Math.abs(p.y - c.cy) < halfH
+        );
+      }
+
+      function easeOutCubic(t) {
+        return 1 - Math.pow(1 - t, 3);
+      }
+
+      function updateGiftRoom(dt) {
+        if (!rewardCards) return;
+        for (let i = 0; i < rewardCards.length; i++) {
+          const c = rewardCards[i];
+          c.t = Math.min(1, c.t + dt * 2.35);
+          const k = easeOutCubic(c.t);
+          c.x = c.sx + (c.tx - c.sx) * k;
+          c.y = c.sy + (c.ty - c.sy) * k;
+        }
+      }
+
+      function openChest() {
+        if (chestOpened) return;
+        chestOpened = true;
+        const cx = giftChest.cx;
+        const sy = giftChest.cy - giftChest.bodyH * 0.35 - giftChest.lidH;
+        rewardCards = [
+          {
+            sx: cx,
+            sy: sy,
+            x: cx,
+            y: sy,
+            tx: cx - 86,
+            ty: sy - 118,
+            t: 0,
+            presentSlot: 0,
+            hue: 215,
+          },
+          {
+            sx: cx,
+            sy: sy,
+            x: cx,
+            y: sy,
+            tx: cx,
+            ty: sy - 132,
+            t: 0,
+            presentSlot: 1,
+            hue: 145,
+          },
+          {
+            sx: cx,
+            sy: sy,
+            x: cx,
+            y: sy,
+            tx: cx + 86,
+            ty: sy - 118,
+            t: 0,
+            presentSlot: 2,
+            hue: 38,
+          },
+        ];
+      }
+
+      function drawChest() {
+        const c = giftChest;
+        const bx = Math.round(c.cx - c.bodyW / 2);
+        const by = Math.round(c.cy - c.bodyH / 2);
+        const lidY = by - c.lidH;
+        if (!chestOpened) {
+          ctx.fillStyle = '#4a3020';
+          ctx.fillRect(bx + 6, lidY + 4, c.bodyW - 12, c.lidH - 4);
+          ctx.fillStyle = '#6b4830';
+          ctx.fillRect(bx, lidY, c.bodyW, c.lidH);
+          ctx.strokeStyle = '#2a1a12';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(bx + 0.5, lidY + 0.5, c.bodyW - 1, c.lidH - 1);
+          ctx.fillStyle = '#c9a227';
+          ctx.fillRect(bx + c.bodyW / 2 - 5, lidY + 4, 10, c.lidH - 8);
+        } else {
+          ctx.fillStyle = '#5a3828';
+          ctx.fillRect(bx - 4, lidY - 6, c.bodyW * 0.45, c.lidH + 4);
+          ctx.fillStyle = '#4a3020';
+          ctx.fillRect(bx + c.bodyW * 0.55, lidY + 2, c.bodyW * 0.48, c.lidH - 2);
+        }
+        ctx.fillStyle = '#5c3d28';
+        ctx.fillRect(bx, by, c.bodyW, c.bodyH);
+        ctx.fillStyle = '#3d2818';
+        ctx.fillRect(bx + 8, by + 10, c.bodyW - 16, c.bodyH - 18);
+        ctx.strokeStyle = '#2a1a10';
         ctx.lineWidth = 2;
-        ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+        ctx.strokeRect(bx + 0.5, by + 0.5, c.bodyW - 1, c.bodyH - 1);
+        ctx.fillStyle = '#b8942e';
+        ctx.fillRect(bx + c.bodyW / 2 - 6, by + c.bodyH - 14, 12, 10);
+        ctx.strokeStyle = '#1a1208';
+        ctx.strokeRect(bx + c.bodyW / 2 - 6.5, by + c.bodyH - 14.5, 13, 11);
+      }
+
+      function drawOpenChestPrompt(near) {
+        if (!near || chestOpened) return;
+        const c = giftChest;
+        const bw = 108;
+        const bh = 30;
+        const bx = Math.round(c.cx - bw / 2);
+        const by = Math.round(c.cy - c.bodyH / 2 - c.lidH - bh - 6);
+        openChestHitRoom.x = bx;
+        openChestHitRoom.y = by;
+        openChestHitRoom.w = bw;
+        openChestHitRoom.h = bh;
+        ctx.fillStyle = 'rgba(20, 12, 18, 0.88)';
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = '#c5a86c';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+        ctx.fillStyle = '#f5ead8';
+        ctx.font = '600 15px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Открыть', c.cx, by + bh / 2);
+      }
+
+      function drawRewardCard(card) {
+        const x = Math.round(card.x - CARD_SIZE / 2);
+        const y = Math.round(card.y - CARD_SIZE / 2);
+        const slot = card.presentSlot | 0;
+        const im = imgPresentSprites[slot];
+        if (im && im.complete && im.naturalWidth > 0) {
+          ctx.drawImage(im, x, y, CARD_SIZE, CARD_SIZE);
+          return;
+        }
+        ctx.fillStyle = 'hsl(' + card.hue + ', 42%, 52%)';
+        ctx.fillRect(x, y, CARD_SIZE, CARD_SIZE);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.fillRect(x + 4, y + 4, CARD_SIZE - 8, 14);
+        ctx.strokeStyle = '#1a1420';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + 0.5, y + 0.5, CARD_SIZE - 1, CARD_SIZE - 1);
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.strokeRect(x + 3.5, y + 3.5, CARD_SIZE - 7, CARD_SIZE - 7);
       }
 
       function enterGiftRoom() {
         if (inGiftRoom) return;
         inGiftRoom = true;
         document.body.classList.add('gift-room');
+        chestOpened = false;
+        rewardCards = null;
         layoutGiftRoomSize();
-        buildGiftPile();
+        layoutGiftRoomProps();
         const hu = players.find((q) => q.human);
         if (hu) {
           hu.x = giftRoomW * 0.5;
@@ -1114,14 +1247,31 @@
         ctx.strokeStyle = '#2a2230';
         ctx.lineWidth = 2;
         ctx.strokeRect(26.5, 26.5, giftRoomW - 53, giftRoomH - 53);
-        for (let i = 0; i < giftBoxes.length; i++) {
-          drawGiftPlaceholder(giftBoxes[i]);
-        }
+        drawChest();
         const hu = players.find((q) => q.human);
         if (hu) {
           drawPlayerFigure(hu);
         }
+        if (rewardCards) {
+          for (let i = 0; i < rewardCards.length; i++) {
+            drawRewardCard(rewardCards[i]);
+          }
+        }
+        if (hu) {
+          drawOpenChestPrompt(playerNearChest(hu));
+        }
         ctx.restore();
+      }
+
+      function canvasRoomFromClient(clientX, clientY) {
+        const r = canvas.getBoundingClientRect();
+        const sx = canvas.width / r.width;
+        const sy = canvas.height / r.height;
+        const mx = (clientX - r.left) * sx;
+        const my = (clientY - r.top) * sy;
+        const rox = Math.floor((canvas.width - giftRoomW) / 2);
+        const roy = Math.floor((canvas.height - giftRoomH) / 2);
+        return { rx: mx - rox, ry: my - roy };
       }
 
       function drawWorld() {
@@ -1718,6 +1868,8 @@
           updateBall(dt);
           updateFloorBounceFx(dt);
           updateWallExplosion(dt);
+        } else {
+          updateGiftRoom(dt);
         }
         drawWorld();
         requestAnimationFrame(frame);
@@ -1741,6 +1893,42 @@
         }
       });
 
+      canvas.addEventListener('mousemove', function (e) {
+        if (!inGiftRoom || chestOpened) {
+          canvas.style.cursor = '';
+          return;
+        }
+        const hu = players.find((q) => q.human);
+        if (!hu || !playerNearChest(hu)) {
+          canvas.style.cursor = '';
+          return;
+        }
+        const p = canvasRoomFromClient(e.clientX, e.clientY);
+        const h = openChestHitRoom;
+        const over =
+          p.rx >= h.x &&
+          p.rx <= h.x + h.w &&
+          p.ry >= h.y &&
+          p.ry <= h.y + h.h;
+        canvas.style.cursor = over ? 'pointer' : 'default';
+      });
+
+      canvas.addEventListener('click', function (e) {
+        if (!inGiftRoom || chestOpened) return;
+        const hu = players.find((q) => q.human);
+        if (!hu || !playerNearChest(hu)) return;
+        const p = canvasRoomFromClient(e.clientX, e.clientY);
+        const h = openChestHitRoom;
+        if (
+          p.rx >= h.x &&
+          p.rx <= h.x + h.w &&
+          p.ry >= h.y &&
+          p.ry <= h.y + h.h
+        ) {
+          openChest();
+        }
+      });
+
       document.getElementById('madnessBtn')?.addEventListener('click', function () {
         const btn = document.getElementById('madnessBtn');
         if (!btn || !btn.classList.contains('madness-btn--visible')) return;
@@ -1749,10 +1937,15 @@
         btn.textContent = 'Супер-удар! Пробел у мяча';
         btn.disabled = true;
         btn.style.cursor = 'default';
+        if (MADNESS_DEBUG_ALWAYS_UNLOCK) {
+          btn.disabled = false;
+          btn.style.cursor = 'pointer';
+        }
       });
 
       updateScoreUI();
       loadPlayerSprites();
+      loadPresentSprites();
       requestAnimationFrame(frame);
     })();
   </script>
